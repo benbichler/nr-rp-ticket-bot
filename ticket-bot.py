@@ -595,7 +595,7 @@ async def on_ready():
     print("------")
 
 @bot.command()
-@commands.has_permissions()
+@commands.has_permissions(administrator=True)
 async def setup(ctx):
     embed = discord.Embed(
         title="NR-RP Support System",
