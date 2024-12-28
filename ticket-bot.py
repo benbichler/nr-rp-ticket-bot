@@ -110,8 +110,14 @@ async def save_transcript(channel):
 
 
 async def handle_ticket_close(channel, closer, reason="No reason specified"):
-    ticket_id = int(channel.name.split('-')[0])
-    ticket_creator = channel.guild.get_member_named(channel.name.split('-')[1].split()[0])
+    # Extract ticket ID and creator name from channel name
+    # Channel name format is: "1234-username (Claimed)" or "1234-username"
+    channel_name_parts = channel.name.split(' ')[0]  # Get part before "(Claimed)" if it exists
+    ticket_id, creator_name = channel_name_parts.split('-', 1)
+    ticket_id = int(ticket_id)
+    
+    # Get the member object for the creator
+    ticket_creator = channel.guild.get_member_named(creator_name)
     staff_member = None
 
     if "(Claimed)" in channel.name:
@@ -127,24 +133,23 @@ async def handle_ticket_close(channel, closer, reason="No reason specified"):
     ticket_type = "premium" if "premium" in category_name else "recovery" if "recovery" in category_name else "general"
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.join(base_dir, f"tickets/{ticket_type}/{channel.id}.json")
-    html_path = os.path.join(base_dir, f"tickets/{ticket_type}/{channel.id}.html")
+    
+    # Create a safe filename using the creator's name from the channel name
+    safe_creator_name = "".join(c for c in creator_name if c.isalnum() or c in ('-', '_')).lower()
+    
+    # Create filenames with ticket ID, creator name, and timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_base_name = f"{ticket_id}-{safe_creator_name}-{timestamp}"
+    
+    json_path = os.path.join(base_dir, f"tickets/{ticket_type}/{file_base_name}.json")
+    html_path = os.path.join(base_dir, f"tickets/{ticket_type}/{file_base_name}.html")
     
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
-
-    # Get ticket creator from the JSON file
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            existing_data = json.load(f)
-            creator_id = existing_data.get('created_by_id')
-            ticket_creator = channel.guild.get_member(creator_id) if creator_id else ticket_creator
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
 
     ticket_data = {
         'ticket_id': channel.id,
         'channel_name': channel.name,
-        'opened_by': ticket_creator.name if ticket_creator else "Unknown",
+        'opened_by': creator_name,
         'opened_by_id': ticket_creator.id if ticket_creator else None,
         'claimed_by': staff_member.name if staff_member else "Management" if ticket_type in ['premium', 'recovery', 'management'] else "Unclaimed",
         'claimed_by_id': staff_member.id if staff_member else None,
@@ -171,7 +176,7 @@ async def handle_ticket_close(channel, closer, reason="No reason specified"):
     )
     transcript_embed.add_field(name="Ticket ID", value=ticket_id, inline=True)
     transcript_embed.add_field(name="Type", value=ticket_type.capitalize(), inline=True)
-    transcript_embed.add_field(name="Opened By", value=ticket_creator.mention if ticket_creator else "Unknown", inline=True)
+    transcript_embed.add_field(name="Opened By", value=ticket_creator.mention if ticket_creator else creator_name, inline=True)
     transcript_embed.add_field(name="Closed By", value=closer.mention, inline=True)
     transcript_embed.add_field(name="Reason", value=reason, inline=False)
     transcript_embed.timestamp = datetime.now()
@@ -180,7 +185,7 @@ async def handle_ticket_close(channel, closer, reason="No reason specified"):
     for target in [ticket_creator, staff_member]:
         if target:
             try:
-                dm_transcript_file = discord.File(html_path, filename=f"transcript-{ticket_id}.html")
+                dm_transcript_file = discord.File(html_path, filename=f"transcript-{file_base_name}.html")
                 await target.send(embed=transcript_embed, view=TranscriptView(dm_transcript_file))
             except discord.Forbidden:
                 print(f"Couldn't DM {target.name}")
@@ -188,7 +193,7 @@ async def handle_ticket_close(channel, closer, reason="No reason specified"):
     # Send to transcript channel
     transcript_channel = channel.guild.get_channel(TRANSCRIPT_CHANNEL_ID)
     if transcript_channel:
-        transcript_file = discord.File(html_path, filename=f"transcript-{ticket_id}.html")
+        transcript_file = discord.File(html_path, filename=f"transcript-{file_base_name}.html")
         view = TranscriptView(transcript_file)
         await transcript_channel.send(embed=transcript_embed, view=view)
 
@@ -383,6 +388,15 @@ class StaffNotificationView(discord.ui.View):
         await ticket_channel.set_permissions(interaction.user, read_messages=True, send_messages=True)
         await ticket_channel.edit(name=f"{ticket_channel.name} (Claimed)")
 
+        # Create and send embed message
+        claim_embed = discord.Embed(
+            description=f"👋 {interaction.user.mention} has claimed your ticket and will assist you shortly.",
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        system_message = await ticket_channel.send(embed=claim_embed)
+        await system_message.pin()
+
         await interaction.response.send_message("You have claimed the ticket!", ephemeral=True)
         
         # Disable the claim button
@@ -525,23 +539,6 @@ class SupportView(discord.ui.View):
                 f"Your ticket has been created! Check {channel.mention}", 
                 ephemeral=True
             )
-            # Save initial ticket data
-            ticket_data = {
-                'ticket_id': channel.id,
-                'channel_name': channel_name,
-                'created_by': interaction.user.name,
-                'created_by_id': interaction.user.id,
-                'ticket_type': ticket_type,
-                'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'status': 'open'
-            }
-
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            json_path = os.path.join(base_dir, f"tickets/{ticket_type}/{channel.id}.json")
-            os.makedirs(os.path.dirname(json_path), exist_ok=True)
-            
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(ticket_data, f, indent=4, ensure_ascii=False)
 
             return True
 
