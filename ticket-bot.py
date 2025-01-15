@@ -401,14 +401,217 @@ class StaffNotificationView(discord.ui.View):
         
         # Disable the claim button
         button.disabled = True
+       
         await interaction.message.edit(view=self)
 
+class UserSelectMenu(discord.ui.Select):
+    def __init__(self, users):
+        options = [
+            discord.SelectOption(
+                label=user.name[:25],
+                description=f"ID: {user.id}"[:50] if user.id else "No ID",
+                value=str(user.id)
+            ) for user in users[:25]
+        ]
+        super().__init__(
+            placeholder="Select users to add...",
+            min_values=1,
+            max_values=min(len(options), 25),
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        # Get selected members
+        selected_members = []
+        for value in self.values:
+            member = interaction.guild.get_member(int(value))
+            if member:
+                selected_members.append(member)
+
+        if not selected_members:
+            await interaction.followup.send("No valid users were selected.", ephemeral=True)
+            return
+
+        # Add users immediately
+        added_users = []
+        failed_users = []
+
+        for member in selected_members:
+            try:
+                await interaction.channel.set_permissions(member,
+                    read_messages=True,
+                    send_messages=True
+                )
+                added_users.append(member)
+            except Exception as e:
+                failed_users.append((member, str(e)))
+
+        # Send results
+        if added_users:
+            # Send a notification in the ticket channel
+            notification = discord.Embed(
+                description=f"✅ {interaction.user.mention} added {', '.join([member.mention for member in added_users])} to the ticket",
+                color=discord.Color.green()
+            )
+            await interaction.channel.send(embed=notification)
+
+            #  Add this DM notification code here
+            dm_embed = discord.Embed(
+                title="Added to Support Ticket",
+                description=f"You have been added to a support ticket in {interaction.guild.name}",
+                color=discord.Color.blue()
+            )
+            dm_embed.add_field(name="Channel", value=f"#{interaction.channel.name}", inline=False)
+            dm_embed.add_field(name="Added By", value=interaction.user.name, inline=False)
+            dm_embed.add_field(name="Click to View", value=interaction.channel.jump_url, inline=False)
+            
+            for member in added_users:
+                try:
+                    await member.send(embed=dm_embed)
+                except discord.Forbidden:
+                    print(f"Could not DM user {member.name}")
+
+            # Send ephemeral confirmation to staff member
+            await interaction.followup.send(
+                f"Successfully added {len(added_users)} user(s) to the ticket.", 
+                ephemeral=True
+            )
+
+        if failed_users:
+            failures = "\n".join([f"• {member.name}" for member, _ in failed_users])
+            await interaction.followup.send(
+                f"Failed to add the following users:\n{failures}", 
+                ephemeral=True
+            )
+
+class AddUserConfirmationView(discord.ui.View):
+    def __init__(self, members):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.members = members
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        added_users = []
+        failed_users = []
+
+        for member in self.members:
+            try:
+                await interaction.channel.set_permissions(member,
+                    read_messages=True,
+                    send_messages=True
+                )
+                added_users.append(member)
+            except Exception as e:
+                failed_users.append((member, str(e)))
+
+        # Create result embed
+        embed = discord.Embed(
+            title="Users Added to Ticket",
+            color=discord.Color.green() if added_users else discord.Color.red(),
+            timestamp=datetime.now()
+        )
+
+        if added_users:
+            users_added = "\n".join([f"• {member.mention}" for member in added_users])
+            embed.add_field(
+                name=f"Successfully Added ({len(added_users)} users)",
+                value=users_added,
+                inline=False
+            )
+
+        if failed_users:
+            failures = "\n".join([f"• {member.name} - {error}" for member, error in failed_users])
+            embed.add_field(
+                name=f"Failed to Add ({len(failed_users)} users)",
+                value=failures,
+                inline=False
+            )
+
+        # Send ephemeral response with results
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        # Delete the original confirmation message
+        await interaction.message.delete()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Delete the original confirmation message
+        await interaction.message.delete()
+        
+        # Send ephemeral cancellation message
+        embed = discord.Embed(
+            description="❌ User addition cancelled",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    def disable_all_buttons(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+class AddUserView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(label="Add Users", style=discord.ButtonStyle.primary, custom_id="search_user", emoji="👥")
+    async def search_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in interaction.user.roles):
+            await interaction.response.send_message("You don't have permission to add users!", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(UserSearchModal())
+
+class UserSearchModal(discord.ui.Modal, title="Search Server Member"):
+    def __init__(self):
+        super().__init__()
+        self.search = discord.ui.TextInput(
+            label="Search by username",
+            placeholder="Enter part of the username...",
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.search)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        search_term = self.search.value.lower()
+        
+        matching_members = [
+            member for member in interaction.guild.members
+            if search_term in member.name.lower() or 
+               search_term in (member.nick.lower() if member.nick else "")
+        ]
+
+        if not matching_members:
+            await interaction.response.send_message("No users found matching that search.", ephemeral=True)
+            return
+
+        select_menu = UserSelectMenu(matching_members)
+        view = discord.ui.View(timeout=60)
+        view.add_item(select_menu)
+        
+        # Send ephemeral selection menu
+        await interaction.response.send_message(
+            "Select users to add to the ticket:",
+            view=view,
+            ephemeral=True
+        )
+
+# Modify the existing UserTicketView to add the new button
 class UserTicketView(discord.ui.View):
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Close", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    def is_staff(self, user):
+        if isinstance(user, discord.Member):
+            return any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in user.roles)
+        return False
+
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.red, custom_id="close_ticket", row=0)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title="Close Confirmation",
@@ -419,12 +622,138 @@ class UserTicketView(discord.ui.View):
         confirm_view = CloseConfirmationView(interaction.user)
         await interaction.response.send_message(embed=embed, view=confirm_view)
 
-    @discord.ui.button(label="Close With Reason", style=discord.ButtonStyle.red, custom_id="close_with_reason")
+    @discord.ui.button(label="Close With Reason", style=discord.ButtonStyle.red, custom_id="close_with_reason", row=0)
     async def close_with_reason(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = CloseReasonModal(self.bot)
         modal.reason.label = "Reason for closing ticket"
         modal.reason.placeholder = "You must provide a reason for closing the ticket"
         await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Add Users", style=discord.ButtonStyle.green, custom_id="add_user", emoji="👥", row=1)
+    async def add_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.is_staff(interaction.user):
+            await interaction.response.send_message("You don't have permission to add users!", ephemeral=True)
+            return
+        await interaction.response.send_modal(UserSearchModal())
+
+    @discord.ui.button(label="Remove Users", style=discord.ButtonStyle.secondary, custom_id="remove_user", emoji="🚫", row=1)
+    async def remove_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.is_staff(interaction.user):
+            await interaction.response.send_message("You don't have permission to remove users!", ephemeral=True)
+            return
+
+        # Get all users with explicit permissions in the channel
+        removable_users = []
+        for overwrite in interaction.channel.overwrites:
+            if isinstance(overwrite, discord.Member) and overwrite.id != interaction.guild.me.id:
+                removable_users.append(overwrite)
+
+        if not removable_users:
+            await interaction.response.send_message("No users can be removed from this ticket.", ephemeral=True)
+            return
+
+        # Create select menu with removable users
+        select_menu = RemoveUserSelectMenu(removable_users)
+        view = discord.ui.View(timeout=60)
+        view.add_item(select_menu)
+        
+        await interaction.response.send_message(
+            "Select users to remove from the ticket:",
+            view=view,
+            ephemeral=True
+        )
+
+    def get_buttons_for_user(self, user):
+        # Start with an empty view
+        self.clear_items()
+        
+        # Always show close buttons
+        self.add_item(self.close_ticket)
+        self.add_item(self.close_with_reason)
+        
+        # Only show staff buttons if user has staff role
+        if isinstance(user, discord.Member) and any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in user.roles):
+            self.add_item(self.add_user)
+            self.add_item(self.remove_user)
+        
+        return self
+    
+class RemoveUserSelectMenu(discord.ui.Select):
+    def __init__(self, users):
+        options = [
+            discord.SelectOption(
+                label=user.name[:25],
+                description=f"ID: {user.id}"[:50] if user.id else "No ID",
+                value=str(user.id)
+            ) for user in users[:25]
+        ]
+        super().__init__(
+            placeholder="Select users to remove...",
+            min_values=1,
+            max_values=min(len(options), 25),
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        selected_members = []
+        for value in self.values:
+            member = interaction.guild.get_member(int(value))
+            if member:
+                selected_members.append(member)
+
+        if not selected_members:
+            await interaction.followup.send("No valid users were selected.", ephemeral=True)
+            return
+
+        # Remove users immediately
+        removed_users = []
+        failed_users = []
+
+        for member in selected_members:
+            try:
+                await interaction.channel.set_permissions(member, overwrite=None)  # Remove permissions
+                removed_users.append(member)
+            except Exception as e:
+                failed_users.append((member, str(e)))
+
+        # Send results
+        if removed_users:
+            # Send a notification in the ticket channel
+            notification = discord.Embed(
+                description=f"❌ {interaction.user.mention} removed {', '.join([member.mention for member in removed_users])} from the ticket",
+                color=discord.Color.red()
+            )
+            await interaction.channel.send(embed=notification)
+
+            # Add this DM notification code here
+            dm_embed = discord.Embed(
+                title="Removed from Support Ticket",
+                description=f"You have been removed from a support ticket in {interaction.guild.name}",
+                color=discord.Color.red()
+            )
+            dm_embed.add_field(name="Channel", value=f"#{interaction.channel.name}", inline=False)
+            dm_embed.add_field(name="Removed By", value=interaction.user.name, inline=False)
+            
+            for member in removed_users:
+                try:
+                    await member.send(embed=dm_embed)
+                except discord.Forbidden:
+                    print(f"Could not DM user {member.name}")
+
+            # Send ephemeral confirmation to staff member
+            await interaction.followup.send(
+                f"Successfully removed {len(removed_users)} user(s) from the ticket.", 
+                ephemeral=True
+            )
+
+        if failed_users:
+            failures = "\n".join([f"• {member.name}" for member, _ in failed_users])
+            await interaction.followup.send(
+                f"Failed to remove the following users:\n{failures}", 
+                ephemeral=True
+            )
 
 class SupportView(discord.ui.View):
     def __init__(self, bot):
@@ -460,8 +789,18 @@ class SupportView(discord.ui.View):
             category = guild.get_channel(self.bot.ticket_configs[ticket_type]['category_id'])
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                interaction.user: discord.PermissionOverwrite(
+                    read_messages=True, 
+                    send_messages=True,
+                    attach_files=True,  # Allow uploading files
+                    embed_links=True    # Allow embedding links
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    read_messages=True, 
+                    send_messages=True,
+                    attach_files=True,
+                    embed_links=True
+                )
             }
 
             if ticket_type in ['premium', 'recovery', 'management']:
@@ -478,22 +817,26 @@ class SupportView(discord.ui.View):
                 color=discord.Color.blue()
             )
 
-            # Add ticket type specific fields
+            # Add ticket type specific fields (keep your existing fields)
             if ticket_type == "general":
-                    info_embed.add_field(name="Issue Description", value=modal.issue.value)
+                info_embed.add_field(name="Issue Description", value=modal.issue.value)
             elif ticket_type=="recovery":
-                    info_embed.add_field(name="Character Name", value=modal.character_name.value)
-                    info_embed.add_field(name="Issue Description", value=modal.issue.value)
+                info_embed.add_field(name="Character Name", value=modal.character_name.value)
+                info_embed.add_field(name="Issue Description", value=modal.issue.value)
             elif ticket_type=="premium":
-                    info_embed.add_field(name="Character Name", value=modal.character_name.value)
-                    info_embed.add_field(name="Email", value=modal.email.value)
-                    info_embed.add_field(name="Issue Description", value=modal.issue.value)
+                info_embed.add_field(name="Character Name", value=modal.character_name.value)
+                info_embed.add_field(name="Email", value=modal.email.value)
+                info_embed.add_field(name="Issue Description", value=modal.issue.value)
             elif ticket_type=="management":
-                    info_embed.add_field(name="Issue Description", value=modal.issue.value)
-                    info_embed.add_field(name="Management Notice", value="This ticket was created with proper acknowledgment", inline=False)
+                info_embed.add_field(name="Issue Description", value=modal.issue.value)
+                info_embed.add_field(name="Management Notice", value="This ticket was created with proper acknowledgment", inline=False)
 
             await channel.send(embed=info_embed)
-            await channel.send(view=UserTicketView(self.bot))
+
+            # Create and send the ticket view with appropriate buttons
+            view = UserTicketView(self.bot)
+            view = view.get_buttons_for_user(interaction.user)
+            await channel.send(view=view)
 
             # Staff notification with type-specific styling
             if staff_channel := guild.get_channel(STAFF_CHANNEL_ID):
@@ -515,19 +858,19 @@ class SupportView(discord.ui.View):
                 staff_notification.add_field(name="Created By", value=interaction.user.mention, inline=True)
                 staff_notification.add_field(name="Channel", value=channel.mention, inline=True)
 
-                # Type specific fields
+                # Type specific fields (keep your existing fields)
                 if ticket_type=="premium":
-                        staff_notification.add_field(name="Character Name", value=modal.character_name.value, inline=True)
-                        staff_notification.add_field(name="Email", value=modal.email.value, inline=True)
-                        staff_notification.description = f"Issue: {modal.issue.value}"
+                    staff_notification.add_field(name="Character Name", value=modal.character_name.value, inline=True)
+                    staff_notification.add_field(name="Email", value=modal.email.value, inline=True)
+                    staff_notification.description = f"Issue: {modal.issue.value}"
                 elif ticket_type=="recovery":
-                        staff_notification.add_field(name="Character Name", value=modal.character_name.value, inline=True)
-                        staff_notification.description = f"Issue: {modal.issue.value}"
+                    staff_notification.add_field(name="Character Name", value=modal.character_name.value, inline=True)
+                    staff_notification.description = f"Issue: {modal.issue.value}"
                 elif ticket_type=="management":
-                        staff_notification.add_field(name="Issue Description", value=modal.issue.value)
-                        staff_notification.add_field(name="Acknowledgment", value="User has acknowledged proper usage", inline=True)
+                    staff_notification.add_field(name="Issue Description", value=modal.issue.value)
+                    staff_notification.add_field(name="Acknowledgment", value="User has acknowledged proper usage", inline=True)
                 else:
-                        staff_notification.description = f"Issue: {modal.issue.value}"
+                    staff_notification.description = f"Issue: {modal.issue.value}"
 
                 if ticket_type == "general":
                     await staff_channel.send(embed=staff_notification, 
@@ -581,51 +924,91 @@ class TicketBot(commands.Bot):
     async def setup_hook(self):
         self.add_view(SupportView(self))
 
+    async def setup_support_message(self):
+        channel = self.get_channel(TICKET_CHANNEL_ID)
+        if channel:
+            # Clear existing messages in the channel
+            await channel.purge()
+            
+            embed = discord.Embed(
+                title="NR-RP Support System",
+                description="Welcome to our support system. Select the appropriate category below:",
+                color=discord.Color.blue()
+            )
+            
+            embed.add_field(
+                name="🎮 General Support",
+                value="For general questions, bug reports, and in-game issues.",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="💎 Billing Support",
+                value="For donation-related inquiries and premium feature support.",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🔑 Account Recovery",
+                value="For account-related issues and recovery requests.",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="✉️ Management Support",
+                value="For management-only communications. Restricted access.",
+                inline=False
+            )
+            
+            embed.set_footer(text="Please select the most appropriate category for faster assistance.")
+            
+            await channel.send(embed=embed, view=SupportView(self))
+
 bot = TicketBot()
+
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    print(f'Connected to bot: {bot.user.name}')
+    print(f'Bot ID: {bot.user.id}')
+    print(f"Discord Version: {discord.__version__}")
     print("Role configurations loaded:")
     print(f"Management Roles: {MANAGEMENT_ROLE_IDS}")
     print(f"Admin & Tester Roles: {ADMIN_AND_TESTER_ROLE_IDS}")
+    print(f"Guild ID: {GUILD_ID}")
+    print(f"Ticket Channel ID: {TICKET_CHANNEL_ID}")
+    print(f"Staff Channel ID: {STAFF_CHANNEL_ID}")
+    print(f"Transcript Channel ID: {TRANSCRIPT_CHANNEL_ID}")
+    print("Category IDs:")
+    print(f"- General: {GENERAL_CATEGORY_ID}")
+    print(f"- Premium: {PREMIUM_CATEGORY_ID}")
+    print(f"- Recovery: {RECOVERY_CATEGORY_ID}")
+    print(f"- Management: {MANAGEMENT_CATEGORY_ID}")
     print("------")
+    
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            print(f"ERROR: Could not find guild with ID {GUILD_ID}")
+            return
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setup(ctx):
-    embed = discord.Embed(
-        title="NR-RP Support System",
-        description="Welcome to our support system. Select the appropriate category below:",
-        color=discord.Color.blue()
-    )
-    
-    embed.add_field(
-        name="🎮 General Support",
-        value="For general questions, bug reports, and in-game issues.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="💎 Billing Support",
-        value="For donation-related inquiries and premium feature support.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🔑 Account Recovery",
-        value="For account-related issues and recovery requests.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="✉️ Management Support",
-        value="For management-only communications. Restricted access.",
-        inline=False
-    )
-    
-    embed.set_footer(text="Please select the most appropriate category for faster assistance.")
-    
-    await ctx.send(embed=embed, view=SupportView(bot))
+        ticket_channel = guild.get_channel(TICKET_CHANNEL_ID)
+        if not ticket_channel:
+            print(f"ERROR: Could not find ticket channel with ID {TICKET_CHANNEL_ID}")
+            return
+
+        staff_channel = guild.get_channel(STAFF_CHANNEL_ID)
+        if not staff_channel:
+            print(f"ERROR: Could not find staff channel with ID {STAFF_CHANNEL_ID}")
+            return
+
+        # Set up the initial support message
+        await bot.setup_support_message()
+        print("Successfully set up support message!")
+        
+    except Exception as e:
+        print(f"Error during initialization: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 bot.run(DISCORD_TOKEN)
