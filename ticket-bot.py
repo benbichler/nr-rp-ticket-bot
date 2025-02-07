@@ -7,6 +7,18 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ticket_bot.log'),
+        logging.StreamHandler()
+    ]
+)
+
 # Load environment variables
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -38,26 +50,165 @@ for dir in TICKET_DIRS:
     os.makedirs(dir, exist_ok=True)
 
 
-def create_html_transcript(transcript_data):
+'''def create_html_transcript(transcript_data):
     return """
     <!DOCTYPE html>
     <html>
     <head>
         <title>Ticket Transcript {id}</title>
         <style>
-            body {{font-family: Arial, sans-serif; margin: 20px;}}
-            .message {{margin: 10px 0; padding: 10px; border-bottom: 1px solid #eee;}}
-            .timestamp {{color: #666; font-size: 0.9em;}}
-            .author {{font-weight: bold;}}
+            :root {{
+                --discord-dark: #36393f;
+                --discord-darker: #2f3136;
+                --discord-light: #dcddde;
+                --discord-lighter: #ffffff;
+                --discord-gray: #72767d;
+                --discord-highlight: #5865f2;
+            }}
+            
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+
+            body {{
+                font-family: 'gg sans', 'Noto Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                background-color: var(--discord-dark);
+                color: var(--discord-light);
+                line-height: 1.4;
+                padding: 20px;
+            }}
+
+            .header {{
+                background-color: var(--discord-darker);
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+            }}
+
+            .header h1 {{
+                color: var(--discord-lighter);
+                font-size: 24px;
+                margin-bottom: 15px;
+            }}
+
+            .info {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 10px;
+                background-color: var(--discord-dark);
+                padding: 15px;
+                border-radius: 5px;
+            }}
+
+            .info p {{
+                color: var(--discord-light);
+                font-size: 14px;
+            }}
+
+            .transcript {{
+                background-color: var(--discord-dark);
+                border-radius: 8px;
+                padding: 10px;
+            }}
+
+            .message {{
+                display: flex;
+                padding: 10px;
+                margin: 2px 0;
+                border-radius: 4px;
+                transition: background-color 0.1s;
+            }}
+
+            .message:hover {{
+                background-color: var(--discord-darker);
+            }}
+
+            .avatar {{
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                margin-right: 15px;
+                background-color: var(--discord-gray);
+                background-size: cover;
+                background-position: center;
+                flex-shrink: 0;
+            }}
+
+            .message-content {{
+                flex-grow: 1;
+            }}
+
+            .message-header {{
+                display: flex;
+                align-items: baseline;
+                margin-bottom: 4px;
+            }}
+
+            .author {{
+                font-weight: 500;
+                color: var(--discord-lighter);
+                margin-right: 8px;
+            }}
+
+            .timestamp {{
+                color: var(--discord-gray);
+                font-size: 0.75rem;
+            }}
+
+            .text {{
+                color: var(--discord-light);
+                font-size: 1rem;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }}
+
+            .embed {{
+                background-color: var(--discord-darker);
+                border-left: 4px solid var(--discord-highlight);
+                border-radius: 4px;
+                padding: 12px;
+                margin: 4px 0;
+            }}
+
+            .embed-title {{
+                color: var(--discord-lighter);
+                font-size: 1rem;
+                font-weight: 600;
+                margin-bottom: 4px;
+            }}
+
+            .embed-description {{
+                color: var(--discord-light);
+                font-size: 0.9rem;
+            }}
+
+            .embed-field {{
+                margin-top: 8px;
+            }}
+
+            .embed-field-name {{
+                color: var(--discord-lighter);
+                font-weight: 600;
+                font-size: 0.9rem;
+            }}
+
+            .embed-field-value {{
+                color: var(--discord-light);
+                font-size: 0.9rem;
+            }}
         </style>
     </head>
     <body>
-        <h1>Ticket Transcript {id}</h1>
-        <div class="info">
-            <p>Opened by: {opened_by}</p>
-            <p>Claimed by: {claimed_by}</p>
-            <p>Closed by: {closed_by}</p>
-            <p>Close reason: {reason}</p>
+        <div class="header">
+            <h1>Ticket Transcript #{id}</h1>
+            <div class="info">
+                <p><strong>Opened by:</strong> {opened_by}</p>
+                <p><strong>Claimed by:</strong> {claimed_by}</p>
+                <p><strong>Closed by:</strong> {closed_by}</p>
+                <p><strong>Close reason:</strong> {reason}</p>
+            </div>
         </div>
         <div class="transcript">
             {transcript}
@@ -70,8 +221,63 @@ def create_html_transcript(transcript_data):
         claimed_by=transcript_data['claimed_by'],
         closed_by=transcript_data['closed_by'],
         reason=transcript_data['close_reason'],
-        transcript=transcript_data['transcript'].replace('\n', '<br>')
+        transcript=transcript_data['transcript']
+    )'''
+
+async def create_transcript_embeds(channel, ticket_data):
+    """Create a series of Discord embeds for the transcript"""
+    embeds = []
+    
+    # Create header embed
+    header_embed = discord.Embed(
+        title=f"Ticket Transcript #{ticket_data['ticket_id']}",
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
     )
+    header_embed.add_field(name="Opened by", value=ticket_data['opened_by'], inline=True)
+    header_embed.add_field(name="Claimed by", value=ticket_data['claimed_by'], inline=True)
+    header_embed.add_field(name="Closed by", value=ticket_data['closed_by'], inline=True)
+    header_embed.add_field(name="Close reason", value=ticket_data['close_reason'], inline=False)
+    embeds.append(header_embed)
+    
+    # Create message embeds
+    current_embed = discord.Embed(color=discord.Color.dark_theme())
+    messages = []
+    
+    async for message in channel.history(limit=None, oldest_first=True):
+        # Skip empty messages and confirmation messages
+        if (not message.content and not message.embeds) or \
+           (message.embeds and message.embeds[0].title == "Close Confirmation") or \
+           (message.content == "Closing ticket...") or \
+           (message.embeds and any(embed.title == "Close Confirmation" for embed in message.embeds)):
+            continue
+            
+        timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        content = message.content if message.content else ""
+        
+        # Format the message
+        formatted_message = f"**{message.author.display_name}** · {timestamp}\n{content}\n"
+        
+        # If adding this message would exceed Discord's limit, create a new embed
+        if len("\n".join(messages + [formatted_message])) > 4000:
+            current_embed.description = "\n".join(messages)
+            embeds.append(current_embed)
+            current_embed = discord.Embed(color=discord.Color.dark_theme())
+            messages = []
+        
+        messages.append(formatted_message)
+        
+        # Handle embeds from the original message
+        for embed in message.embeds:
+            if len(embeds) < 10:  # Discord has a limit of 10 embeds per message
+                embeds.append(embed)
+    
+    # Add any remaining messages
+    if messages:
+        current_embed.description = "\n".join(messages)
+        embeds.append(current_embed)
+    
+    return embeds[:10]  # Discord has a limit of 10 embeds per message
 
 
 def create_ticket_info_embed(ticket_id, opened_by, closed_by=None, claimed_by="Not claimed", open_time=None, reason=None, is_closed=False):
@@ -97,122 +303,176 @@ def create_ticket_info_embed(ticket_id, opened_by, closed_by=None, claimed_by="N
 
     return embed
 
-async def save_transcript(channel):
-    """Save channel transcript to a string"""
-    transcript = []
+'''async def save_transcript(channel):
+    """Save channel transcript to a string with Discord-like HTML formatting"""
+    transcript_parts = []
     async for message in channel.history(limit=None, oldest_first=True):
+        # Skip messages that have no content and no embeds
+        if not message.content and not message.embeds:
+            continue
+            
         timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        content = message.content or "None"
+        content = message.content if message.content else ""
+        
+        message_html = f'<div class="message"><div class="avatar" style="background-image: url(\'{message.author.display_avatar.url}\')"></div><div class="message-content"><div class="message-header"><span class="author">{message.author.display_name}</span><span class="timestamp">{timestamp}</span></div><div class="text">{content}</div>'
+        
+        # Handle embeds
         for embed in message.embeds:
-            content += f"\nEmbed: {embed.title} - {embed.description}"
-        transcript.append(f"[{timestamp}] {message.author}: {content}")
-    return "\n".join(transcript)
+            embed_html = '<div class="embed">'
+            if embed.title:
+                embed_html += f'<div class="embed-title">{embed.title}</div>'
+            if embed.description:
+                embed_html += f'<div class="embed-description">{embed.description}</div>'
+            
+            for field in embed.fields:
+                embed_html += f'<div class="embed-field"><div class="embed-field-name">{field.name}</div><div class="embed-field-value">{field.value}</div></div>'
+            
+            embed_html += '</div>'
+            message_html += embed_html
+        
+        message_html += '</div></div>'
+        transcript_parts.append(message_html)
+    
+    return '\n'.join(transcript_parts)'''
 
 
+# 1. First, update the handle_ticket_close function to properly identify ticket types
 async def handle_ticket_close(channel, closer, reason="No reason specified"):
-    # Extract ticket ID and creator name from channel name
-    # Channel name format is: "1234-username (Claimed)" or "1234-username"
-    channel_name_parts = channel.name.split(' ')[0]  # Get part before "(Claimed)" if it exists
-    ticket_id, creator_name = channel_name_parts.split('-', 1)
-    ticket_id = int(ticket_id)
-    
-    # Get the member object for the creator
-    ticket_creator = channel.guild.get_member_named(creator_name)
-    staff_member = None
-
-    if "(Claimed)" in channel.name:
-        async for message in channel.history():
-            if "has been claimed by" in message.content:
-                staff_mention = message.content.split("claimed by ")[1]
-                staff_id = int(staff_mention.strip("<@!>"))
-                staff_member = channel.guild.get_member(staff_id)
-                break
-
-    transcript = await save_transcript(channel)
-    category_name = channel.category.name.lower()
-    ticket_type = "premium" if "premium" in category_name else "recovery" if "recovery" in category_name else "general"
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Create a safe filename using the creator's name from the channel name
-    safe_creator_name = "".join(c for c in creator_name if c.isalnum() or c in ('-', '_')).lower()
-    
-    # Create filenames with ticket ID, creator name, and timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_base_name = f"{ticket_id}-{safe_creator_name}-{timestamp}"
-    
-    json_path = os.path.join(base_dir, f"tickets/{ticket_type}/{file_base_name}.json")
-    html_path = os.path.join(base_dir, f"tickets/{ticket_type}/{file_base_name}.html")
-    
-    os.makedirs(os.path.dirname(json_path), exist_ok=True)
-
-    ticket_data = {
-        'ticket_id': channel.id,
-        'channel_name': channel.name,
-        'opened_by': creator_name,
-        'opened_by_id': ticket_creator.id if ticket_creator else None,
-        'claimed_by': staff_member.name if staff_member else "Management" if ticket_type in ['premium', 'recovery', 'management'] else "Unclaimed",
-        'claimed_by_id': staff_member.id if staff_member else None,
-        'close_reason': reason,
-        'closed_by': closer.name,
-        'closed_by_id': closer.id,
-        'closed_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'ticket_type': ticket_type,
-        'transcript': transcript
-    }
-    
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(ticket_data, f, indent=4, ensure_ascii=False)
+    try:
+        # Extract ticket number from channel name
+        channel_name_parts = channel.name.split(' ')[0]
+        ticket_number = channel_name_parts.split('-')[0]
         
-    html_content = create_html_transcript(ticket_data)
-    with open(html_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+        logging.info(f"Initiating ticket close - ID: {ticket_number}, Closer: {closer.name} ({closer.id})")
+        
+        # Retrieve ticket metadata
+        ticket_metadata = bot.get_ticket_metadata(ticket_number)
 
-    # Create transcript embed
-    transcript_embed = discord.Embed(
-        title="Ticket Closed",
-        description=f"Ticket {channel.name} has been closed.",
-        color=discord.Color.red()
-    )
-    transcript_embed.add_field(name="Ticket ID", value=ticket_id, inline=True)
-    transcript_embed.add_field(name="Type", value=ticket_type.capitalize(), inline=True)
-    transcript_embed.add_field(name="Opened By", value=ticket_creator.mention if ticket_creator else creator_name, inline=True)
-    transcript_embed.add_field(name="Closed By", value=closer.mention, inline=True)
-    transcript_embed.add_field(name="Reason", value=reason, inline=False)
-    transcript_embed.timestamp = datetime.now()
-
-    # Send DM notifications with transcript
-    for target in [ticket_creator, staff_member]:
-        if target:
+        # Attempt to find ticket creator using stored user ID
+        ticket_creator = None
+        creator_name = None
+        if ticket_metadata and 'user_id' in ticket_metadata:
             try:
-                dm_transcript_file = discord.File(html_path, filename=f"transcript-{file_base_name}.html")
-                await target.send(embed=transcript_embed, view=TranscriptView(dm_transcript_file))
-            except discord.Forbidden:
-                print(f"Couldn't DM {target.name}")
-
-    # Send to transcript channel
-    transcript_channel = channel.guild.get_channel(TRANSCRIPT_CHANNEL_ID)
-    if transcript_channel:
-        transcript_file = discord.File(html_path, filename=f"transcript-{file_base_name}.html")
-        view = TranscriptView(transcript_file)
-        await transcript_channel.send(embed=transcript_embed, view=view)
-
-    # Update staff notification channel
-    staff_channel = channel.guild.get_channel(STAFF_CHANNEL_ID)
-    if staff_channel:
-        # Find and delete the original notification
-        async for message in staff_channel.history(limit=100):
-            if (message.author.bot and message.embeds and 
-                len(message.embeds) > 0 and 
-                message.embeds[0].title.startswith("New") and 
-                str(ticket_id) in message.embeds[0].to_dict()['fields'][0]['value']):
-                await message.delete()
-                break
+                ticket_creator = channel.guild.get_member(ticket_metadata['user_id'])
+                if ticket_creator:
+                    creator_name = ticket_creator.name
+            except Exception as e:
+                logging.error(f"Error retrieving ticket creator by ID: {e}")
         
-        # Send closure notification
-        await staff_channel.send(embed=transcript_embed)
+        # Fallback to extracting creator name from channel name if not found
+        if not creator_name:
+            try:
+                # Split the channel name to get the creator name
+                creator_name = channel.name.split('-', 1)[1]
+                ticket_creator = channel.guild.get_member_named(creator_name)
+                logging.info(f"Found ticket creator: {ticket_creator.name if ticket_creator else 'Not found'}")
+            except Exception as e:
+                logging.error(f"Error extracting creator name from channel: {e}")
+                creator_name = "Unknown"
+                
+        stored_messages = []
+        async for message in channel.history(limit=None, oldest_first=True):
+            if not message.content.strip():
+                continue
+            stored_messages.append({
+                'content': message.content,
+                'author_name': message.author.name,
+                'timestamp': message.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                'embeds': [embed.to_dict() for embed in message.embeds]
+            })
 
-    return transcript_file
+        
+        staff_member = None
+        if "(Claimed)" in channel.name:
+            async for message in channel.history():
+                if "has been claimed by" in message.content:
+                    staff_mention = message.content.split("claimed by ")[1]
+                    staff_id = int(staff_mention.strip("<@!>"))
+                    try:
+                        staff_member = await channel.guild.fetch_member(staff_id)
+                        logging.info(f"Found staff member: {staff_member.name}")
+                    except Exception as e:
+                        logging.error(f"Error finding staff member: {e}")
+                    break
+
+        category_name = channel.category.name.lower()
+        ticket_type = (
+            "premium" if "premium" in category_name
+            else "recovery" if "recovery" in category_name
+            else "management" if "management" in category_name
+            else "general"
+        )
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        safe_creator_name = "".join(c for c in creator_name if c.isalnum() or c in ('-', '_')).lower()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_base_name = f"{ticket_number}-{safe_creator_name}-{timestamp}"
+        
+        ticket_folder = os.path.join(base_dir, f"tickets/{ticket_type}")
+        os.makedirs(ticket_folder, exist_ok=True)
+        
+        json_path = os.path.join(ticket_folder, f"{file_base_name}.json")
+
+        ticket_data = {
+            'ticket_id': ticket_number,
+            'channel_name': channel.name, 
+            'opened_by': creator_name,
+            'opened_by_id': ticket_creator.id if ticket_creator else None,
+            'claimed_by': staff_member.name if staff_member else "Management" if ticket_type in ['premium', 'recovery', 'management'] else "Unclaimed",
+            'claimed_by_id': staff_member.id if staff_member else None,
+            'close_reason': reason,
+            'closed_by': closer.name,
+            'closed_by_id': closer.id,
+            'closed_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'ticket_type': ticket_type,
+            'messages': stored_messages
+        }
+        
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(ticket_data, f, indent=4, ensure_ascii=False)
+            logging.info(f"Saved ticket data to {json_path}")
+
+        view = TranscriptView(stored_messages, ticket_data)
+        
+        close_notification = discord.Embed(
+            title="Ticket Closed",
+            description=f"Ticket {channel.name} has been closed.",
+            color=discord.Color.red(),
+            timestamp=datetime.now()
+        )
+        close_notification.add_field(name="Ticket ID", value=ticket_number, inline=True)
+        close_notification.add_field(name="Type", value=ticket_type.capitalize(), inline=True)
+        close_notification.add_field(name="Opened By", value=ticket_creator.mention if ticket_creator else creator_name, inline=True)
+        close_notification.add_field(name="Closed By", value=closer.mention, inline=True)
+        close_notification.add_field(name="Reason", value=reason, inline=False)
+
+        # Send notifications to ticket creator and staff
+        for target in [ticket_creator, staff_member]:
+            if target:
+                try:
+                    logging.info(f"Attempting to send DM to {target.name} ({target.id})")
+                    await target.send(embed=close_notification, view=view)
+                    logging.info(f"Successfully sent close notification to {target.name}")
+                except discord.Forbidden:
+                    logging.warning(f"Couldn't DM {target.name} - DMs disabled")
+                except Exception as e:
+                    logging.error(f"Error DMing {target.name}: {str(e)}")
+
+        # Send to transcript channel
+        transcript_channel = channel.guild.get_channel(TRANSCRIPT_CHANNEL_ID)
+        if transcript_channel:
+            try:
+                await transcript_channel.send(embed=close_notification, view=view)
+                logging.info("Successfully sent transcript to transcript channel")
+            except Exception as e:
+                logging.error(f"Error sending to transcript channel: {str(e)}")
+
+        logging.info(f"Successfully closed ticket {ticket_number}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error in handle_ticket_close: {str(e)}")
+        return False
 
 class CloseConfirmationView(discord.ui.View):
     def __init__(self, user):
@@ -226,10 +486,14 @@ class CloseConfirmationView(discord.ui.View):
             return
             
         channel = interaction.channel
-        await handle_ticket_close(channel, interaction.user)
-        await interaction.response.send_message("Closing ticket...", ephemeral=True)
-        await asyncio.sleep(5)
-        await channel.delete()
+        try:
+            # Save transcript first
+            await handle_ticket_close(channel, interaction.user, "Closed without reason")
+            await interaction.response.send_message("Closing ticket...", ephemeral=True)
+            await asyncio.sleep(5)
+            await channel.delete()
+        except Exception as e:
+            await interaction.response.send_message(f"Error closing ticket: {str(e)}", ephemeral=True)
 
 class CloseReasonModal(discord.ui.Modal, title="Close Ticket"):
     def __init__(self, bot):
@@ -245,10 +509,14 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket"):
 
     async def on_submit(self, interaction: discord.Interaction):
         channel = interaction.channel
-        await handle_ticket_close(channel, interaction.user, self.reason.value)
-        await interaction.response.send_message("Closing ticket...", ephemeral=True)
-        await asyncio.sleep(5)
-        await channel.delete()
+        try:
+            # Save transcript with the provided reason
+            await handle_ticket_close(channel, interaction.user, self.reason.value)
+            await interaction.response.send_message("Closing ticket...", ephemeral=True)
+            await asyncio.sleep(5)
+            await channel.delete()
+        except Exception as e:
+            await interaction.response.send_message(f"Error closing ticket: {str(e)}", ephemeral=True)
 
 
 class ManagementSupportModal(discord.ui.Modal, title="Management Support"):
@@ -352,13 +620,55 @@ class BillingSupportModal(discord.ui.Modal, title="Billing Support"):
         await view.create_ticket(interaction, "premium", self)
 
 class TranscriptView(discord.ui.View):
-    def __init__(self, transcript_file):
+    def __init__(self, messages, ticket_data):
         super().__init__(timeout=None)
-        self.transcript_file = transcript_file
+        self.messages = messages
+        self.ticket_data = ticket_data
     
-    @discord.ui.button(label="View Transcript", style=discord.ButtonStyle.primary, custom_id="view_transcript")
+    @discord.ui.button(label="View Transcript", style=discord.ButtonStyle.primary, emoji="📄")
     async def view_transcript(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(file=self.transcript_file, ephemeral=True)
+        try:
+            logging.info(f"User {interaction.user.name} viewing transcript for ticket {self.ticket_data['ticket_id']}")
+            await interaction.response.defer(ephemeral=True)
+            
+            embeds = []
+            header_embed = discord.Embed(
+                title=f"Ticket Transcript #{self.ticket_data['ticket_id']}",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
+            )
+            header_embed.add_field(name="Opened by", value=self.ticket_data['opened_by'], inline=True)
+            header_embed.add_field(name="Claimed by", value=self.ticket_data['claimed_by'], inline=True)
+            header_embed.add_field(name="Closed by", value=self.ticket_data['closed_by'], inline=True)
+            header_embed.add_field(name="Close reason", value=self.ticket_data['close_reason'], inline=False)
+            embeds.append(header_embed)
+
+            current_embed = discord.Embed(color=discord.Color.dark_theme())
+            current_messages = []
+            
+            for msg in self.messages:
+                if not msg['content'].strip():
+                    continue
+                    
+                formatted_message = f"**{msg['author_name']}** · {msg['timestamp']}\n{msg['content']}\n"
+                
+                if len("\n".join(current_messages + [formatted_message])) > 4000:
+                    current_embed.description = "\n".join(current_messages)
+                    embeds.append(current_embed)
+                    current_embed = discord.Embed(color=discord.Color.dark_theme())
+                    current_messages = []
+                
+                current_messages.append(formatted_message)
+            
+            if current_messages:
+                current_embed.description = "\n".join(current_messages)
+                embeds.append(current_embed)
+            
+            await interaction.followup.send(embeds=embeds[:10], ephemeral=True)
+            logging.info(f"Successfully displayed transcript for ticket {self.ticket_data['ticket_id']}")
+        except Exception as e:
+            logging.error(f"Error displaying transcript: {str(e)}")
+            await interaction.followup.send("An error occurred while displaying the transcript.", ephemeral=True)
 
 
 
@@ -787,6 +1097,11 @@ class SupportView(discord.ui.View):
             channel_name = f"{ticket_number}-{interaction.user.name}"
             
             category = guild.get_channel(self.bot.ticket_configs[ticket_type]['category_id'])
+
+            # Define Ben's user ID
+            BEN_USER_ID = 220880488875687936
+            ben_user = guild.get_member(BEN_USER_ID)
+
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 interaction.user: discord.PermissionOverwrite(
@@ -802,6 +1117,20 @@ class SupportView(discord.ui.View):
                     embed_links=True
                 )
             }
+            # Add Ben's permissions if he's in the server and has sufficient permissions
+            if ben_user and (
+                ben_user.guild_permissions.administrator or 
+                any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in ben_user.roles) or
+                any(role.id in MANAGEMENT_ROLE_IDS for role in ben_user.roles)
+            ):
+                overwrites[ben_user] = discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True,
+                    attach_files=True,
+                    embed_links=True,
+                    manage_messages=True,
+                    manage_channels=True
+                )
 
             if ticket_type in ['premium', 'recovery', 'management']:
                 for role_id in MANAGEMENT_ROLE_IDS:
@@ -809,6 +1138,7 @@ class SupportView(discord.ui.View):
                         overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
             channel = await category.create_text_channel(name=channel_name, overwrites=overwrites)
+            self.bot.save_ticket_metadata(ticket_number, interaction.user.id, channel.id)
 
             # Ticket info embed
             info_embed = discord.Embed(
@@ -920,6 +1250,27 @@ class TicketBot(commands.Bot):
                 'folder': 'tickets/management',
             }
         }
+
+        # New attribute to track ticket metadata
+        self.ticket_metadata = {}
+
+    def save_ticket_metadata(self, ticket_number, user_id, channel_id):
+        """Save metadata for a newly created ticket"""
+        self.ticket_metadata[str(ticket_number)] = {
+            'user_id': user_id,
+            'channel_id': channel_id
+        }
+        
+        # Optional: Limit metadata size to prevent memory growth
+        if len(self.ticket_metadata) > 1000:
+            # Remove oldest tickets if exceeding 1000
+            oldest_tickets = sorted(self.ticket_metadata.keys())[:100]
+            for ticket in oldest_tickets:
+                del self.ticket_metadata[ticket]
+
+    def get_ticket_metadata(self, ticket_number):
+        """Retrieve metadata for a specific ticket"""
+        return self.ticket_metadata.get(str(ticket_number))
 
     async def setup_hook(self):
         self.add_view(SupportView(self))
