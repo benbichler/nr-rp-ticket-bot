@@ -752,7 +752,9 @@ class UserSelectMenu(discord.ui.Select):
             try:
                 await interaction.channel.set_permissions(member,
                     read_messages=True,
-                    send_messages=True
+                    send_messages=True,
+                    attach_files=True,
+                    embed_links=True
                 )
                 added_users.append(member)
             except Exception as e:
@@ -781,7 +783,7 @@ class UserSelectMenu(discord.ui.Select):
                 try:
                     await member.send(embed=dm_embed)
                 except discord.Forbidden:
-                    print(f"Could not DM user {member.name}")
+                    logging.info(f"Could not DM user {member.name}")
 
             # Send ephemeral confirmation to staff member
             await interaction.followup.send(
@@ -910,7 +912,6 @@ class UserSearchModal(discord.ui.Modal, title="Search Server Member"):
             ephemeral=True
         )
 
-# Modify the existing UserTicketView to add the new button
 class UserTicketView(discord.ui.View):
     def __init__(self, bot):
         super().__init__(timeout=None)
@@ -918,8 +919,14 @@ class UserTicketView(discord.ui.View):
 
     def is_staff(self, user):
         if isinstance(user, discord.Member):
-            return any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in user.roles)
+            return any(role.id in (ADMIN_AND_TESTER_ROLE_IDS + MANAGEMENT_ROLE_IDS) for role in user.roles)
         return False
+
+    def get_ticket_creator_id(self, channel):
+        # Assuming ticket creator ID is stored in channel topic
+        if channel.topic and channel.topic.isdigit():
+            return int(channel.topic)
+        return None
 
     @discord.ui.button(label="Close", style=discord.ButtonStyle.red, custom_id="close_ticket", row=0)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -941,15 +948,30 @@ class UserTicketView(discord.ui.View):
 
     @discord.ui.button(label="Add Users", style=discord.ButtonStyle.green, custom_id="add_user", emoji="👥", row=1)
     async def add_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check if user is staff
         if not self.is_staff(interaction.user):
             await interaction.response.send_message("You don't have permission to add users!", ephemeral=True)
             return
+        
+        # Check if user is the ticket creator
+        ticket_creator_id = self.get_ticket_creator_id(interaction.channel)
+        if interaction.user.id == ticket_creator_id:
+            await interaction.response.send_message("As the ticket creator, you cannot add users!", ephemeral=True)
+            return
+            
         await interaction.response.send_modal(UserSearchModal())
 
     @discord.ui.button(label="Remove Users", style=discord.ButtonStyle.secondary, custom_id="remove_user", emoji="🚫", row=1)
     async def remove_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check if user is staff
         if not self.is_staff(interaction.user):
             await interaction.response.send_message("You don't have permission to remove users!", ephemeral=True)
+            return
+        
+        # Check if user is the ticket creator
+        ticket_creator_id = self.get_ticket_creator_id(interaction.channel)
+        if interaction.user.id == ticket_creator_id:
+            await interaction.response.send_message("As the ticket creator, you cannot remove users!", ephemeral=True)
             return
 
         # Get all users with explicit permissions in the channel
@@ -972,21 +994,7 @@ class UserTicketView(discord.ui.View):
             view=view,
             ephemeral=True
         )
-
-    def get_buttons_for_user(self, user):
-        # Start with an empty view
-        self.clear_items()
         
-        # Always show close buttons
-        self.add_item(self.close_ticket)
-        self.add_item(self.close_with_reason)
-        
-        # Only show staff buttons if user has staff role
-        if isinstance(user, discord.Member) and any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in user.roles):
-            self.add_item(self.add_user)
-            self.add_item(self.remove_user)
-        
-        return self
     
 class RemoveUserSelectMenu(discord.ui.Select):
     def __init__(self, users):
@@ -1050,7 +1058,7 @@ class RemoveUserSelectMenu(discord.ui.Select):
                 try:
                     await member.send(embed=dm_embed)
                 except discord.Forbidden:
-                    print(f"Could not DM user {member.name}")
+                    logging.info(f"Could not DM user {member.name}")
 
             # Send ephemeral confirmation to staff member
             await interaction.followup.send(
@@ -1099,8 +1107,8 @@ class SupportView(discord.ui.View):
             category = guild.get_channel(self.bot.ticket_configs[ticket_type]['category_id'])
 
             # Define Ben's user ID
-            BEN_USER_ID = 220880488875687936
-            ben_user = guild.get_member(BEN_USER_ID)
+          #  BEN_USER_ID = 220880488875687936
+          #  ben_user = guild.get_member(BEN_USER_ID)
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -1118,19 +1126,19 @@ class SupportView(discord.ui.View):
                 )
             }
             # Add Ben's permissions if he's in the server and has sufficient permissions
-            if ben_user and (
-                ben_user.guild_permissions.administrator or 
-                any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in ben_user.roles) or
-                any(role.id in MANAGEMENT_ROLE_IDS for role in ben_user.roles)
-            ):
-                overwrites[ben_user] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True,
-                    manage_messages=True,
-                    manage_channels=True
-                )
+           # if ben_user and (
+           #     ben_user.guild_permissions.administrator or 
+            #    any(role.id in ADMIN_AND_TESTER_ROLE_IDS for role in ben_user.roles) or
+            #    any(role.id in MANAGEMENT_ROLE_IDS for role in ben_user.roles)
+          #  ):
+           #     overwrites[ben_user] = discord.PermissionOverwrite(
+            #        read_messages=True,
+             #       send_messages=True,
+             #       attach_files=True,
+             #       embed_links=True,
+             #       manage_messages=True,
+             #       manage_channels=True
+              #  )
 
             if ticket_type in ['premium', 'recovery', 'management']:
                 for role_id in MANAGEMENT_ROLE_IDS:
@@ -1165,7 +1173,6 @@ class SupportView(discord.ui.View):
 
             # Create and send the ticket view with appropriate buttons
             view = UserTicketView(self.bot)
-            view = view.get_buttons_for_user(interaction.user)
             await channel.send(view=view)
 
             # Staff notification with type-specific styling
@@ -1202,11 +1209,23 @@ class SupportView(discord.ui.View):
                 else:
                     staff_notification.description = f"Issue: {modal.issue.value}"
 
+                # Add role mention based on ticket type
+                role_mention = ""
                 if ticket_type == "general":
-                    await staff_channel.send(embed=staff_notification, 
+                    # Mention admins and testers for general tickets
+                    role_mentions = [f"<@&{role_id}>" for role_id in ADMIN_AND_TESTER_ROLE_IDS]
+                    role_mention = " ".join(role_mentions)
+                elif ticket_type in ["premium", "recovery", "management"]:
+                    # Mention management roles for premium, recovery, and management tickets
+                    role_mentions = [f"<@&{role_id}>" for role_id in MANAGEMENT_ROLE_IDS]
+                    role_mention = " ".join(role_mentions)
+
+                # Send notification with role mentions
+                if ticket_type == "general":
+                    await staff_channel.send(content=role_mention, embed=staff_notification, 
                                         view=StaffNotificationView(self.bot, channel.id))
                 else:
-                    await staff_channel.send(embed=staff_notification)
+                    await staff_channel.send(content=role_mention, embed=staff_notification)
 
             await interaction.followup.send(
                 f"Your ticket has been created! Check {channel.mention}", 
@@ -1216,9 +1235,9 @@ class SupportView(discord.ui.View):
             return True
 
         except Exception as e:
-            print(f"Error creating ticket: {e}")
-            await interaction.followup.send("An error occurred while creating the ticket.", ephemeral=True)
-            return False
+                logging.error(f"Error creating ticket: {e}")
+                await interaction.followup.send("An error occurred while creating the ticket.", ephemeral=True)
+                return False
     
 class TicketBot(commands.Bot):
     def __init__(self):
@@ -1320,46 +1339,45 @@ bot = TicketBot()
 
 @bot.event
 async def on_ready():
-    print(f'Connected to bot: {bot.user.name}')
-    print(f'Bot ID: {bot.user.id}')
-    print(f"Discord Version: {discord.__version__}")
-    print("Role configurations loaded:")
-    print(f"Management Roles: {MANAGEMENT_ROLE_IDS}")
-    print(f"Admin & Tester Roles: {ADMIN_AND_TESTER_ROLE_IDS}")
-    print(f"Guild ID: {GUILD_ID}")
-    print(f"Ticket Channel ID: {TICKET_CHANNEL_ID}")
-    print(f"Staff Channel ID: {STAFF_CHANNEL_ID}")
-    print(f"Transcript Channel ID: {TRANSCRIPT_CHANNEL_ID}")
-    print("Category IDs:")
-    print(f"- General: {GENERAL_CATEGORY_ID}")
-    print(f"- Premium: {PREMIUM_CATEGORY_ID}")
-    print(f"- Recovery: {RECOVERY_CATEGORY_ID}")
-    print(f"- Management: {MANAGEMENT_CATEGORY_ID}")
-    print("------")
+    logging.info(f'Connected to bot: {bot.user.name}')
+    logging.info(f'Bot ID: {bot.user.id}')
+    logging.info(f"Discord Version: {discord.__version__}")
+    logging.info("Role configurations loaded:")
+    logging.info(f"Management Roles: {MANAGEMENT_ROLE_IDS}")
+    logging.info(f"Admin & Tester Roles: {ADMIN_AND_TESTER_ROLE_IDS}")
+    logging.info(f"Guild ID: {GUILD_ID}")
+    logging.info(f"Ticket Channel ID: {TICKET_CHANNEL_ID}")
+    logging.info(f"Staff Channel ID: {STAFF_CHANNEL_ID}")
+    logging.info(f"Transcript Channel ID: {TRANSCRIPT_CHANNEL_ID}")
+    logging.info("Category IDs:")
+    logging.info(f"- General: {GENERAL_CATEGORY_ID}")
+    logging.info(f"- Premium: {PREMIUM_CATEGORY_ID}")
+    logging.info(f"- Recovery: {RECOVERY_CATEGORY_ID}")
+    logging.info(f"- Management: {MANAGEMENT_CATEGORY_ID}")
+    logging.info("------")
     
     try:
         guild = bot.get_guild(GUILD_ID)
         if not guild:
-            print(f"ERROR: Could not find guild with ID {GUILD_ID}")
+            logging.error(f"ERROR: Could not find guild with ID {GUILD_ID}")
             return
 
         ticket_channel = guild.get_channel(TICKET_CHANNEL_ID)
         if not ticket_channel:
-            print(f"ERROR: Could not find ticket channel with ID {TICKET_CHANNEL_ID}")
+            logging.error(f"ERROR: Could not find ticket channel with ID {TICKET_CHANNEL_ID}")
             return
 
         staff_channel = guild.get_channel(STAFF_CHANNEL_ID)
         if not staff_channel:
-            print(f"ERROR: Could not find staff channel with ID {STAFF_CHANNEL_ID}")
+            logging.error(f"ERROR: Could not find staff channel with ID {STAFF_CHANNEL_ID}")
             return
 
         # Set up the initial support message
         await bot.setup_support_message()
-        print("Successfully set up support message!")
+        logging.info("Successfully set up support message!")
         
     except Exception as e:
-        print(f"Error during initialization: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"Error during initialization: {str(e)}")
+        
 
 bot.run(DISCORD_TOKEN)
